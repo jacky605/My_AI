@@ -7,7 +7,7 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 
 # 頁面配置
-st.set_page_config(page_title="AI Health Pharmacy - 混合 RAG 助手", page_icon="💊")
+st.set_page_config(page_title="AI  - 混合 RAG 助手", page_icon="💊")
 st.title("💊 本地私有 + 聯網搜尋 混合 RAG 助手")
 st.caption("優先檢索本地 ChromaDB 知識庫，查無資料時自動連網搜尋")
 
