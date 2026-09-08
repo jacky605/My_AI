@@ -142,6 +142,17 @@ llm, web_search = init_models()
 if "pending_action" not in st.session_state:
     st.session_state.pending_action = None
 
+if st.sidebar.button("🧹 清除對話紀錄", use_container_width=True):
+    if os.path.exists(HISTORY_FILE):
+        try:
+            os.remove(HISTORY_FILE)
+        except Exception:
+            pass
+    st.session_state.messages = [{"role": "assistant", "content": "對話紀錄已清除！"}]
+    st.rerun()
+
+st.sidebar.markdown("---")
+
 # --- A. 本地知識庫檔案管理 (.txt) ---
 st.sidebar.header("📁 本地知識庫檔案管理 (.txt)")
 file_list = [f for f in os.listdir(DATA_DIR) if f.endswith(".txt")]
@@ -280,21 +291,8 @@ if st.session_state.pending_action:
 # ------------------------------------------------------------------------------
 # 5. 主畫面 UI & 對話互動 (支援 Streaming)
 # ------------------------------------------------------------------------------
-col_title, col_clean = st.columns([4, 1], vertical_alignment="center")
-with col_title:
-    st.title("💊 本地私有 + 聯網搜尋 混合 RAG 助手")
-    st.caption("具備增量向量切分、對話上下文記憶與安全程式碼修訂")
-
-with col_clean:
-    if st.button("🧹 清除對話紀錄", use_container_width=True):
-        if os.path.exists(HISTORY_FILE):
-            try:
-                os.remove(HISTORY_FILE)
-            except Exception:
-                pass
-        st.session_state.messages = [{"role": "assistant", "content": "對話紀錄已清除！"}]
-        st.rerun()
-
+st.title("💊 本地私有 + 聯網搜尋 混合 RAG 助手")
+st.caption("具備增量向量切分、對話上下文記憶與安全程式碼修訂")
 st.markdown("---")
 
 # Prompt 模組組裝
