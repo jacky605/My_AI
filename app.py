@@ -16,10 +16,10 @@ st.caption("優先檢索本地 ChromaDB 知識庫，查無資料時自動連網�
 def init_components():
     # 1. 本地私有資料
     documents = [
-        "AI Health Pharmacy 的內部數據庫系統於 2026 年升級至 FHIR R4 標準。",
+        "AI 的內部數據庫系統於 2026 年升級至 FHIR R4 標準。",
         "專案管理員為 Kwok，負責監督 RAG 檢索系統與本地 OLMo 模型的部署。",
         "系統預設的數據切分大小 (Chunk Size) 為 500 字元，重疊 (Overlap) 為 50 字元。",
-        "藥局系統的緊急聯絡電話為 0800-123-456，服務時間為週一至週五 09:00-18:00。",
+        "系統的緊急聯絡電話為 0800-123-456，服務時間為週一至週五 09:00-18:00。",
     ]
     
     # 2. 本地 ChromaDB 向量庫
@@ -54,7 +54,7 @@ chain = prompt | llm | StrOutputParser()
 # 初始化歷史訊息
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "你好！我是混合 RAG 助手。你可以問我內部藥局系統問題，或是任何最新的網路資訊！"}
+        {"role": "assistant", "content": "你好！我是混合 RAG 助手。你可以問我任何問題，或是任何最新的網路資訊！"}
     ]
 
 # 渲染歷史對話
