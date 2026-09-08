@@ -1,0 +1,76 @@
+import streamlit as st
+from langchain_chroma import Chroma
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_ollama import ChatOllama, OllamaEmbeddings
+
+# 頁面標題與佈局設定
+st.set_page_config(page_title="AI Health Pharmacy - 私有知識庫問答", page_icon="💊")
+st.title("💊 本地私有 RAG 知識庫助手")
+st.caption("基於 LangChain + ChromaDB + Ollama (OLMo 2)")
+
+# 快取載入 RAG Chain，避免每次刷新頁面都重新初始化
+@st.cache_resource
+def init_rag_chain():
+    documents = [
+        "AI Health Pharmacy 的內部數據庫系統於 2026 年升級至 FHIR R4 標準。",
+        "專案管理員為 Kwok，負責監督 RAG 檢索系統與本地 OLMo 模型的部署。",
+        "系統預設的數據切分大小 (Chunk Size) 為 500 字元，重疊 (Overlap) 為 50 字元。",
+        "藥局系統的緊急聯絡電話為 0800-123-456，服務時間為週一至週五 09:00-18:00。",
+    ]
+    
+    embeddings = OllamaEmbeddings(model="nomic-embed-text")
+    vectorstore = Chroma.from_texts(texts=documents, embedding=embeddings)
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
+    
+    llm = ChatOllama(model="olmo2", temperature=0.1)
+    
+    template = """請根據以下背景資料回答問題：
+
+【背景資料】
+{context}
+
+【問題】
+{question}
+
+請根據資料內容直接回答，若資料完全未提及才回答「資料未提及」。
+"""
+    prompt = ChatPromptTemplate.from_template(template)
+    
+    return (
+        {"context": retriever, "question": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
+
+# 初始化 RAG 鏈
+rag_chain = init_rag_chain()
+
+# 初始化 Streamlit 對話歷史儲存器
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": "你好！我是內部私有知識庫助手，請回答關於藥局系統或專案架構的問題。"}
+    ]
+
+# 渲染歷史對話紀錄
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# 接收使用者輸入
+if prompt_text := st.chat_input("請輸入你的問題..."):
+    # 顯示使用者訊息
+    st.session_state.messages.append({"role": "user", "content": prompt_text})
+    with st.chat_message("user"):
+        st.markdown(prompt_text)
+
+    # 生成助手回答（帶轉圈載入效果）
+    with st.chat_message("assistant"):
+        with st.spinner("檢索知識庫並生成回答中..."):
+            response = rag_chain.invoke(prompt_text)
+            st.markdown(response)
+            
+    # 記錄助手回應到 Session
+    st.session_state.messages.append({"role": "assistant", "content": response})
