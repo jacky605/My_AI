@@ -2,6 +2,7 @@ import ast
 import json
 import os
 import shutil
+import html
 import streamlit as st
 from langchain_chroma import Chroma
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -74,7 +75,7 @@ def fetch_context_by_query(prompt_text, vectorstore, web_search):
     # 情況 B：標準向量檢索 (使用相似度距離分數)
     docs_and_scores = vectorstore.similarity_search_with_score(prompt_text, k=3)
     
-    # L2/Cosine 距離越低代表越相似，門檻設為 0.6 (可依需求微調)
+    # L2/Cosine 距離越低代表越相似，門檻設為 0.6
     if docs_and_scores and docs_and_scores[0][1] < 0.6:
         st.info("💡 來源：本地私有知識庫 (ChromaDB)")
         return "\n\n".join([doc.page_content for doc, _ in docs_and_scores])
@@ -89,7 +90,9 @@ def fetch_context_by_query(prompt_text, vectorstore, web_search):
 def convert_messages_for_langchain(messages_history):
     """轉換歷史對話格式，提供近 3 輪對話上下文 (前 6 則)"""
     langchain_history = []
-    for m in messages_history[-7:-1]:
+    # 排除剛加入的最末則 user 提問訊息
+    history_messages = messages_history[:-1] if len(messages_history) > 1 else []
+    for m in history_messages[-6:]:
         if m["role"] == "user":
             langchain_history.append(HumanMessage(content=m["content"]))
         elif m["role"] == "assistant":
@@ -101,7 +104,6 @@ def convert_messages_for_langchain(messages_history):
 # ------------------------------------------------------------------------------
 @st.cache_resource
 def init_vectorstore():
-    # 重新構建時先清空數據庫目錄，防止數據累積重複寫入
     if os.path.exists(CHROMA_DB_DIR):
         try:
             shutil.rmtree(CHROMA_DB_DIR)
@@ -130,18 +132,25 @@ def init_vectorstore():
     return Chroma.from_texts(texts=docs, embedding=embeddings, persist_directory=CHROMA_DB_DIR)
 
 @st.cache_resource
-def init_models():
-    return ChatOllama(model="olmo2", temperature=0.1), DuckDuckGoSearchRun()
+def get_llm_model(model_name: str, temperature: float = 0.1):
+    """初始化與快取指定名稱的 ChatOllama LLM"""
+    return ChatOllama(model=model_name, temperature=temperature)
+
+@st.cache_resource
+def get_web_search_tool():
+    """初始化與快取 DuckDuckGo 搜尋工具"""
+    return DuckDuckGoSearchRun()
 
 vectorstore = init_vectorstore()
-llm, web_search = init_models()
+web_search = get_web_search_tool()
 
 # ------------------------------------------------------------------------------
-# 4. 側邊欄：檔案與程式碼管理面板
+# 4. 側邊欄：清除紀錄、模型切換與檔案管理面板
 # ------------------------------------------------------------------------------
 if "pending_action" not in st.session_state:
     st.session_state.pending_action = None
 
+# --- A. 清除對話紀錄按鈕 (置頂於側邊欄) ---
 if st.sidebar.button("🧹 清除對話紀錄", use_container_width=True):
     if os.path.exists(HISTORY_FILE):
         try:
@@ -153,7 +162,25 @@ if st.sidebar.button("🧹 清除對話紀錄", use_container_width=True):
 
 st.sidebar.markdown("---")
 
-# --- A. 本地知識庫檔案管理 (.txt) ---
+# --- B. LLM 模型動態切換面板 ---
+st.sidebar.header("🤖 LLM 模型切換")
+available_models = ["qwen2.5", "olmo2", "llama3.1", "gemma2", "deepseek-r1"]
+selected_model_name = st.sidebar.selectbox(
+    "選擇 Ollama 本地模型：",
+    options=available_models,
+    index=0,
+    help="請確保選定的模型已透過 `ollama pull <model>` 下載至本地。"
+)
+custom_model = st.sidebar.text_input("或自訂模型名稱 (例: qwen2.5:14b):", value="")
+active_model_name = custom_model.strip() if custom_model.strip() else selected_model_name
+
+# 載入當前選擇的模型
+llm = get_llm_model(active_model_name)
+st.sidebar.caption(f"當前啟用模型：`{active_model_name}`")
+
+st.sidebar.markdown("---")
+
+# --- C. 本地知識庫檔案管理 (.txt) ---
 st.sidebar.header("📁 本地知識庫檔案管理 (.txt)")
 file_list = [f for f in os.listdir(DATA_DIR) if f.endswith(".txt")]
 
@@ -194,7 +221,7 @@ if st.sidebar.button("🔍 預覽並建立新檔"):
     else:
         st.sidebar.error("請輸入有效的 .txt 檔名！")
 
-# --- B. app.py 系統原始碼線上編輯器 ---
+# --- D. app.py 系統原始碼線上編輯器 ---
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ 系統原始碼編輯 (app.py)")
 
@@ -219,7 +246,7 @@ if st.sidebar.button("🔍 檢查語法並修改 app.py"):
     except SyntaxError as e:
         st.sidebar.error(f"❌ 語法錯誤阻擋修改！\n行號 {e.lineno}: {e.msg}")
 
-# --- C. AI 自我修訂草稿審核面板 ---
+# --- E. AI 自我修訂草稿審核面板 ---
 if os.path.exists(PROPOSED_CODE_FILE):
     st.sidebar.markdown("---")
     st.sidebar.warning("⚠️ 檢測到 AI 提出了新的程式碼修訂草稿：")
@@ -259,12 +286,29 @@ if os.path.exists(PROPOSED_CODE_FILE):
         except Exception as e:
             st.sidebar.error(f"刪除草稿失敗: {e}")
 
-# --- D. 變更預覽與確定確認卡片 ---
+# --- F. 變更預覽與確定確認卡片 (使用安全的 HTML 預覽框) ---
 if st.session_state.pending_action:
     action = st.session_state.pending_action
     st.sidebar.warning("⚠️ 請核對以下變更細節：")
     st.sidebar.markdown(f"**目標檔案:** `{action['filename']}`")
-    st.sidebar.text_area("即將寫入的內容預覽：", action['content'], height=120, disabled=True)
+    
+    safe_content = html.escape(action['content'])
+    preview_html = f"""
+    <div style="
+        background-color: #262730; 
+        color: #f0f2f6; 
+        border: 1px solid #ff4b4b; 
+        padding: 10px; 
+        border-radius: 5px; 
+        font-family: monospace; 
+        white-space: pre-wrap; 
+        max-height: 180px; 
+        overflow-y: auto;
+        font-size: 0.85rem;">
+        {safe_content}
+    </div>
+    """
+    st.sidebar.markdown(preview_html, unsafe_allow_html=True)
     
     col_confirm, col_cancel = st.sidebar.columns(2)
     
@@ -292,16 +336,20 @@ if st.session_state.pending_action:
 # 5. 主畫面 UI & 對話互動 (支援 Streaming)
 # ------------------------------------------------------------------------------
 st.title("💊 本地私有 + 聯網搜尋 混合 RAG 助手")
-st.caption("具備增量向量切分、對話上下文記憶與安全程式碼修訂")
+st.caption(f"當前模型：`{active_model_name}` ｜ 具備動態切換、增量向量切分與對話上下文記憶")
 st.markdown("---")
 
 # Prompt 模組組裝
-template = """你是一個專業的助手。請根據【參考資料】與【對話歷史】精準回答問題。
+template = """你是一個精準、邏輯嚴謹的 AI 助手。請嚴格根據以下【參考資料】與【對話歷史】來回答使用者的問題。
+
+【回答規則】
+1. **理解意圖**：仔細閱讀問題，確保回答切中重點。
+2. **基於事實**：如果【參考資料】中有相關解答，請優先根據資料回答。
+3. **誠實告知**：如果【參考資料】沒有相關訊息且你無法確定，請直接說明「目前資料庫中無相關資訊」。
+4. **簡潔明確**：直接回答核心問題，除非使用者要求，否則不要重複問題。
 
 【參考資料】
 {context}
-
-注意：若資料包含程式碼，請直接分析，不要回答「無法讀取外部文件」。
 """
 
 prompt = ChatPromptTemplate.from_messages([
@@ -328,17 +376,20 @@ if prompt_text := st.chat_input("請輸入你的問題..."):
         st.markdown(prompt_text)
 
     with st.chat_message("assistant"):
-        with st.spinner("思考與檢索中..."):
+        with st.spinner(f"[{active_model_name}] 思考與檢索中..."):
             final_context = fetch_context_by_query(prompt_text, vectorstore, web_search)
             history = convert_messages_for_langchain(st.session_state.messages)
             
-            # 使用 st.write_stream 與 chain.stream 實現即時打字機串流效果
-            response_stream = chain.stream({
-                "context": final_context, 
-                "chat_history": history,
-                "question": prompt_text
-            })
-            full_response = st.write_stream(response_stream)
+            try:
+                response_stream = chain.stream({
+                    "context": final_context, 
+                    "chat_history": history,
+                    "question": prompt_text
+                })
+                full_response = st.write_stream(response_stream)
+            except Exception as e:
+                full_response = f"⚠️ 模型執行出錯（請確認 `{active_model_name}` 是否已透過 `ollama pull` 下載）：\n`{e}`"
+                st.error(full_response)
             
     st.session_state.messages.append({"role": "assistant", "content": full_response})
     save_chat_history(st.session_state.messages)

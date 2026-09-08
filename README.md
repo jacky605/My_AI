@@ -102,6 +102,10 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 # 下載預設 LLM (OLMo 2)
 ollama pull olmo2
 
+# 下載其他可選 LLM
+ollama pull qwen2.5
+ollama pull llama3.1
+
 # 下載文本向量模型 (Nomic Embed)
 ollama pull nomic-embed-text
 
